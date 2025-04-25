@@ -1,0 +1,17 @@
+---
+title: "Project"
+author: "Dipankar Lahiri"
+date: "2025-04-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+
+my_df <- read_csv("/Users/dipankarlahiri/Desktop/Project/AI Responses Combined.csv")
+
+
+
+```
+
