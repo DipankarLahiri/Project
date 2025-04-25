@@ -64,8 +64,6 @@ my_df$`Social media use` <- recode(my_df$`Social media use`,
 )
 
 my_df <- my_df %>% select(Gender, Subject, `AI Use`, Trust, Age, Nationality, `Replace Human`, Productive)
-my_df1 <- subset(my_df, Nationality != "Chinese")
-
 ```
 
 # Descriptive Stats, Viz.
@@ -233,6 +231,10 @@ my_df %>%
     .groups = 'drop'
   )
 
+trust_summary <- my_df %>%
+  group_by(Gender) %>%
+  summarise(median = median(Trust))
+
 h2_table <- my_df %>%
   group_by(Gender) %>%
   summarise(
@@ -280,17 +282,27 @@ ggplot(my_df, aes(Gender, fill = factor(Trust))) +
   theme_minimal() +
   theme(legend.position = "bottom")
 
-ggplot(my_df, aes(Gender, Trust, color = Gender)) +
+ggplot(my_df, aes(x = Gender, y = Trust, color = Gender)) +
   geom_jitter(width = 0.15, height = 0.15, alpha = 0.4, size = 2) +
-  geom_point(data = trust_summary, aes(y = median), 
-             shape = 21, size = 8, fill = "white", stroke = 1.5) +
-  geom_text(data = trust_summary, aes(y = median, label = median), 
-            color = "black", size = 3.5) +
+  geom_point(
+    data = trust_summary, 
+    aes(x = Gender, y = median),  # Added x aesthetic
+    shape = 21, size = 8, fill = "white", stroke = 1.5,
+    inherit.aes = FALSE
+  ) +
+  geom_text(
+    data = trust_summary,
+    aes(x = Gender, y = median, label = median),  # Added x aesthetic
+    color = "black", size = 3.5,
+    inherit.aes = FALSE
+  ) +
   scale_color_manual(values = c("Not Female" = "#4ECDC4", "Female" = "#FF6B6B")) +
   scale_y_continuous(breaks = 1:5, limits = c(1, 5.5)) +
-  labs(title = "Males Show Higher Median AI Trust",
-       subtitle = "White circles show medians (Males=4, Females=3)",
-       y = "Trust Level (1-5)") +
+  labs(
+    title = "Gender Differences in AI Trust",
+    subtitle = "White circles show group medians",
+    y = "Trust Level (1-5)"
+  ) +
   theme_minimal()
 
 wilcox.test(Trust ~ Gender, data = my_df)
