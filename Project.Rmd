@@ -2,7 +2,9 @@
 title: "Project"
 author: "Dipankar Lahiri"
 date: "2025-04-25"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -15,6 +17,7 @@ library(ggplot2)
 library(rstatix)
 library(ggdist)
 library(gt)
+library(tidyverse)
 
 my_df <- read_csv("/Users/dipankarlahiri/Desktop/Project/AI Responses Combined.csv")
 colnames(my_df)[4] <- "AI Use"
@@ -143,15 +146,7 @@ barplot(table(my_df$Subject), main = "Field of Study", col = "steelblue", ylab =
 
 ```{r}
 
-my_df %>%
-  group_by(Gender) %>%
-  summarise(
-    n = n(),
-    median_AI_Use = median(`AI Use`),
-    mean_AI_Use = round(mean(`AI Use`), 2),
-    .groups = 'drop'
-  )
-
+### 1. DESCRIPTIVE STATISTICS ###
 h1_table <- my_df %>%
   group_by(Gender) %>%
   summarise(
@@ -168,73 +163,127 @@ h1_table <- my_df %>%
     title = md("**AI Chatbot Usage by Gender**"),
     subtitle = "0-4 scale (Higher = more frequent use)"
   ) %>%
-  fmt_number(
-    columns = c(Mean, SD),
-    decimals = 2
-  ) %>%
+  fmt_number(columns = c(Mean, SD), decimals = 2) %>%
   cols_label(
     n = md("**N**"),
     Median = md("**Median**"),
     Mean = md("**Mean**"),
     SD = md("**SD**")
-  ) %>%
-  tab_style(
-    style = cell_text(weight = "bold"),
-    locations = cells_column_labels()
   )
-h1_table
 
-my_df %>%
+### 2. VISUALIZATIONS ###
+# Heatmap
+heatmap_plot <- my_df %>%
   count(Gender, `AI Use`) %>%
   ggplot(aes(Gender, `AI Use`, fill = n)) +
   geom_tile(color = "white") +
   geom_text(aes(label = n), color = "white") +
-  scale_fill_gradient(low = "#FF6B6B", high = "#4ECDC4") +
-  scale_y_continuous(breaks = 0:4) +
-  labs(title = "AI Use Frequency by Gender",
-       x = NULL, y = "AI Use (0-4)") +
-  theme_minimal()
+  scale_fill_gradient(low = "#4ECDC4", high = "#FF6B6B") +
+  labs(title = "AI Use Frequency Distribution by Gender")
 
-ggplot(my_df, aes(Gender, `AI Use`, fill = Gender)) +
+# Boxplot
+boxplot <- ggplot(my_df, aes(Gender, `AI Use`, fill = Gender)) +
   geom_boxplot() +
   scale_fill_manual(values = c("Not Female" = "#4ECDC4", "Female" = "#FF6B6B")) +
-  labs(title = "Males Use AI More Frequently",
-       subtitle = "Median: Males = 3, Females = 2",
-       y = "AI Use Frequency (0-4 scale)") +
-  theme_minimal()
+  labs(title = "Distribution of AI Use Frequency")
 
-my_df$Gender <- factor(my_df$Gender, levels = c("Not Female", "Female"))
-wilcox.test(`AI Use` ~ Gender, data = my_df)
-wilcox_effsize(`AI Use` ~ Gender, data = my_df, ci = TRUE)
+### 3. ORDINAL ANALYSIS ###
+wilcox_result <- wilcox.test(`AI Use` ~ Gender, data = my_df, exact = FALSE)
 effsize <- wilcox_effsize(`AI Use` ~ Gender, data = my_df, ci = TRUE)
+
+### 4. BINARY ANALYSIS ###
+my_df <- my_df %>%
+  mutate(AI_Use_Binary = factor(ifelse(`AI Use` >= 3, "High", "Low"), 
+                               levels = c("Low", "High")))
+
+# Enhanced Contingency Table with Odds Calculation
+contingency_table <- my_df %>%
+  group_by(Gender, AI_Use_Binary) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = AI_Use_Binary, values_from = Count) %>%
+  mutate(
+    Total = Low + High,
+    `% High` = round(High/Total*100, 1),
+    `Within-Group Odds (High/Low)` = round(High / Low, 2)
+  ) %>%
+  gt() %>%
+  tab_header(title = "High vs Low AI Use by Gender") %>%
+  fmt_number(columns = c(Low, High, Total, `Within-Group Odds (High/Low)`), decimals = 2) %>%
+  cols_label(
+    `% High` = md("**% High**"),
+    `Within-Group Odds (High/Low)` = md("**Within-Group Odds (High/Low)**")
+  )
+
+# Correct Odds Ratio Calculation
+tab <- table(my_df$Gender, my_df$AI_Use_Binary)
+
+a <- 17
+b <- 16
+c <- 21
+d <- 101
+
+or <- (a * d) / (b * c)
+or_se <- sqrt(1/a + 1/b + 1/c + 1/d)
+or_ci <- exp(log(or) + c(-1.96, 1.96) * or_se)
+
+# Chi-square Test
+chi_test <- chisq.test(tab)
+
+### 5. FINAL REPORTING ###
+cat("\n--- H1: Males use AI chatbots more than females ---\n\n")
+
+male_median <- h1_table$`_data`$Median[h1_table$`_data`$Gender == "Not Female"]
+female_median <- h1_table$`_data`$Median[h1_table$`_data`$Gender == "Female"]
+
+cat("Ordinal Analysis:\n")
 cat(sprintf(
-  "\nProbability superiority: P(Male > Female) = %.1f%% (95%% CI [%.1f%%, %.1f%%])",
-  (effsize$effsize + 1)/2 * 100,  # Convert to percentage
+  "Males reported significantly higher AI use frequencies (Mdn = %.1f vs. Females Mdn = %.1f; Mann-Whitney U = %.0f, *p* = %.3f).\n",
+  male_median, female_median,
+  wilcox_result$statistic,
+  wilcox_result$p.value
+))
+cat(sprintf(
+  "The effect size was small-to-medium (rank-biserial *r* = %.2f, 95%% CI [%.2f, %.2f]), indicating a %.1f%% probability that a randomly selected male would report higher usage than a female (95%% CI [%.1f%%, %.1f%%]).\n\n",
+  effsize$effsize,
+  effsize$conf.low,
+  effsize$conf.high,
+  (effsize$effsize + 1)/2 * 100,
   (effsize$conf.low + 1)/2 * 100,
   (effsize$conf.high + 1)/2 * 100
 ))
+
+cat("Binary Analysis:\n")
+cat(sprintf(
+  "Males had %.1f× higher odds of being high-frequency users (≥3 on the scale) (χ²(1) = %.2f, *p* = %.3f; 95%% CI [%.2f, %.2f]).\n",
+  or,
+  chi_test$statistic,
+  chi_test$p.value,
+  or_ci[1],
+  or_ci[2]
+))
+
+# Display all outputs
+h1_table
+contingency_table
+heatmap_plot
+boxplot
+
 ```
 
-A Wilcoxon rank-sum test (equivalent to Mann-Whitney U test) revealed a statistically significant difference in AI use frequency between genders (W = 2685.5, *p* = .002), with males (Mdn = 3.0, *n* = 33) reporting higher usage than females (Mdn = 2.0, *n* = 122). The effect size was small-to-medium (rank-biserial *r* = 0.25, 95% CI [0.07, 0.43]), indicating a 62.7% probability that a randomly selected male would report higher AI use than a randomly selected female (95% CI [54.0%, 70.5%]).
-
-Note. The Wilcoxon rank-sum test (Mann-Whitney U test) was used because: The outcome (AI Use) was ordinal, Groups were independent, and Distributions were non-normal. Effect sizes were interpreted as: *r* = 0.10 (small), 0.30 (medium), 0.50 (large).
+Justification: Medians, resisting outliers, clearly show males cluster at "3" (AI use) vs. females at "2" (AI use).
+An ordinal outcome (AI Use on a Likert-type scale) and independent groups (gender) necessitated a non-parametric approach. The Wilcoxon rank-sum test (Mann-Whitney U) was chosen to detect differences in AI use frequency without assuming normality. Effect size (rank-biserial r) and probability of superiority were reported to convey practical significance beyond p-values.
+To complement the ordinal analysis, a binary categorisation (low vs. high AI use) was created to facilitate a chi-square test of independence. This allowed for the examination of proportional differences in high-frequency usage between genders. The odds ratio and its confidence interval were calculated to quantify the strength and direction of the association. 95% confident that the true odds ratio is somewhere between 2.23 and 11.71. Why Chi-square (not Fisher’s)? All expected counts >5 (no small-cell bias).
+Both tests agree (medians and ORs show male > female use).Narrow CIs (e.g., OR CI [2.23, 11.71] excludes 1 = strong evidence).
 
 ## H2: Males show higher levels of trust for information generated by AI chatbots than females.
 
 ```{r}
 
-my_df %>%
-  group_by(Gender) %>%
-  summarise(
-    n = n(),
-    median = median(Trust),
-    .groups = 'drop'
-  )
+### PREP: Make Trust numeric early ###
+my_df <- my_df %>%
+  mutate(Trust = as.numeric(as.character(Trust)))
 
-trust_summary <- my_df %>%
-  group_by(Gender) %>%
-  summarise(median = median(Trust))
-
+### 1. DESCRIPTIVE STATISTICS ###
 h2_table <- my_df %>%
   group_by(Gender) %>%
   summarise(
@@ -251,95 +300,132 @@ h2_table <- my_df %>%
     title = md("**AI Trust Levels by Gender**"),
     subtitle = "1-5 scale (Higher = more trust)"
   ) %>%
-  fmt_number(
-    columns = c(Mean, SD),
-    decimals = 2
-  ) %>%
+  fmt_number(columns = c(Mean, SD), decimals = 2) %>%
   cols_label(
     n = md("**N**"),
     Median = md("**Median**"),
     Mean = md("**Mean**"),
     SD = md("**SD**")
-  ) %>%
-  tab_style(
-    style = cell_text(weight = "bold"),
-    locations = cells_column_labels()
-  ) %>%
-  tab_footnote(
-    footnote = "Note: Trust measured on 1 (Low) to 5 (High) scale",
-    locations = cells_title(groups = "subtitle")
   )
 
-h2_table
+### 2. VISUALIZATIONS ###
+# For plotting only: Treat Trust as factor, temporary
+my_df_plot <- my_df %>%
+  mutate(Trust = factor(Trust, levels = sort(unique(Trust), decreasing = TRUE)))
 
-ggplot(my_df, aes(Gender, fill = factor(Trust))) +
+# Stacked bar chart
+ggplot(my_df_plot, aes(Gender, fill = Trust)) +
   geom_bar(position = "fill") +
-  scale_fill_brewer(palette = "RdYlGn", direction = -1) +  # Red(low)-Green(high)
-  scale_y_continuous(labels = scales::percent) +
-  labs(title = "AI Trust Levels by Gender",
-       y = "Percentage",
-       fill = "Trust Score") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
+  scale_fill_brewer(palette = "RdYlGn", direction = -1) +
+  scale_y_continuous(labels = scales::percent) +  # <-- add this
+  labs(title = "AI Trust Distribution by Gender", y = "Percentage")
 
-ggplot(my_df, aes(x = Gender, y = Trust, color = Gender)) +
-  geom_jitter(width = 0.15, height = 0.15, alpha = 0.4, size = 2) +
+# Jitter plot with medians
+trust_summary_gender <- my_df %>%
+  group_by(Gender) %>%
+  summarise(median = median(Trust), .groups = "drop")
+
+ggplot(my_df, aes(Gender, Trust, color = Gender)) +
+  geom_jitter(width = 0.15, alpha = 0.4) +
   geom_point(
-    data = trust_summary, 
-    aes(x = Gender, y = median),  # Added x aesthetic
-    shape = 21, size = 8, fill = "white", stroke = 1.5,
-    inherit.aes = FALSE
+    data = trust_summary_gender, 
+    aes(y = median), 
+    shape = 21, size = 8, fill = "white"
   ) +
   geom_text(
-    data = trust_summary,
-    aes(x = Gender, y = median, label = median),  # Added x aesthetic
-    color = "black", size = 3.5,
-    inherit.aes = FALSE
+    data = trust_summary_gender,
+    aes(y = median, label = median), 
+    color = "black", size = 3.5
   ) +
   scale_color_manual(values = c("Not Female" = "#4ECDC4", "Female" = "#FF6B6B")) +
-  scale_y_continuous(breaks = 1:5, limits = c(1, 5.5)) +
-  labs(
-    title = "Gender Differences in AI Trust",
-    subtitle = "White circles show group medians",
-    y = "Trust Level (1-5)"
-  ) +
-  theme_minimal()
+  labs(title = "Gender Differences in AI Trust")
 
-wilcox.test(Trust ~ Gender, data = my_df)
-wilcox_effsize(Trust ~ Gender, data = my_df, ci = TRUE)
+### 3. ORDINAL ANALYSIS ###
+wilcox_result <- wilcox.test(Trust ~ Gender, data = my_df, exact = FALSE)
 effsize <- wilcox_effsize(Trust ~ Gender, data = my_df, ci = TRUE)
-prob_superiority <- (effsize$effsize + 1)/2
-prob_ci_low <- (effsize$conf.low + 1)/2  
-prob_ci_high <- (effsize$conf.high + 1)/2
+
+### 4. BINARY ANALYSIS ###
+# Dichotomize Trust (High = 4-5, Low = 1-3)
+my_df <- my_df %>% 
+  mutate(High_Trust = ifelse(Trust >= 4, "High", "Low"))
+
+contingency_table <- my_df %>%
+  group_by(Gender, High_Trust) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = High_Trust, values_from = Count) %>%
+  mutate(
+    Total = Low + High,
+    `% High` = round(High / Total * 100, 1),
+    `Within-Group Odds (High/Low)` = round(High / Low, 2)
+  ) %>%
+  gt() %>%
+  tab_header(title = "High vs Low AI Trust by Gender") %>%
+  fmt_number(columns = c(Low, High, Total, `Within-Group Odds (High/Low)`), decimals = 2) %>%
+  cols_label(
+    `% High` = md("**% High**"),
+    `Within-Group Odds (High/Low)` = md("**Within-Group Odds (High/Low)**")
+  )
+
+# Odds Ratio Calculation
+a <- 18
+b <- 15
+c <- 35
+d <- 87
+or <- (a * d) / (b * c)
+or_ci <- exp(log(or) + c(-1.96, 1.96) * sqrt(1/a + 1/b + 1/c + 1/d))
+
+# Chi-square Test
+cont_table <- matrix(c(a, b, c, d), nrow = 2)
+chi_test <- chisq.test(cont_table)
+
+### 5. REPORTING ###
+cat("--- H2: Males show higher trust in AI-generated information ---\n\n")
+
+cat("Ordinal Analysis:\n")
 cat(sprintf(
-  "Probability superiority: P(Male > Female) = %.1f%% (95%% CI [%.1f%%, %.1f%%])",
-  prob_superiority * 100,
-  prob_ci_low * 100,
-  prob_ci_high * 100
+  "Males reported higher trust levels (Mdn = %.1f vs. Females Mdn = %.1f; Mann-Whitney U = %.0f, p = %.3f).\n",
+  h2_table$Median[h2_table$Gender == "Not Female"],
+  h2_table$Median[h2_table$Gender == "Female"],
+  wilcox_result$statistic,
+  wilcox_result$p.value
 ))
+cat(sprintf(
+  "Effect size: r = %.2f (95%% CI [%.2f, %.2f]). Probability superiority = %.1f%% (95%% CI [%.1f%%, %.1f%%]).\n\n",
+  effsize$effsize,
+  effsize$conf.low,
+  effsize$conf.high,
+  (effsize$effsize + 1)/2 * 100,
+  (effsize$conf.low + 1)/2 * 100,
+  (effsize$conf.high + 1)/2 * 100
+))
+
+cat("Binary Analysis (Trust ≥4):\n")
+cat(sprintf(
+  "Males had %.1f× higher odds of high trust (χ²(1) = %.2f, p = %.3f; 95%% CI [%.2f, %.2f]).",
+  or,
+  chi_test$statistic,
+  chi_test$p.value,
+  or_ci[1],
+  or_ci[2]
+))
+
+# Display tables
+h2_table
+contingency_table
+
 
 ```
 
-A Wilcoxon rank-sum test (equivalent to Mann-Whitney U test) revealed a statistically significant difference in trust levels between genders (W = 2542, *p* = .011), with males (Mdn = 4.0, *n* = 33) reporting higher trust than females (Mdn = 3.0, *n* = 122). The effect size was small-to-medium (rank-biserial *r* = 0.21, 95% CI [0.04, 0.37]), indicating a 60.3% probability that a randomly selected male would trust AI-generated information more than a randomly selected female (95% CI [52.5%, 68.5%]).
-
-The Wilcoxon rank-sum test (Mann-Whitney U test) was used because: The outcome (Trust) was ordinal (5-point scale), Groups were independent, and Distributions were non-normal. The test statistic W is R’s implementation of the Mann-Whitney U test.
+A Wilcoxon rank-sum test revealed that males reported significantly higher trust in AI-generated information (Mdn = 4.0) compared to females (Mdn = 3.0), U = 1484, p = .011. The effect size was small-to-moderate, r = .21, 95% CI [.03, .37], with a probability of superiority of 60.3% (95% CI [51.5%, 68.5%]).
+To complement the ordinal analysis, trust was dichotomized, and a chi-square test showed a significant association between gender and high trust rates, χ²(1) = 6.61, p = .010. Males had 3.0 times greater odds of reporting high trust compared to females, 95% CI [1.35, 6.57].
 
 ## H3: Those who study STEM subjects show higher levels of trust for information generated by AI chatbots than those who study Humanities and Social Sciences.
 
 ```{r}
 
-my_df %>%
-  group_by(Subject) %>%
-  summarise(
-    n = n(),
-    Median = median(Trust),
-    Mean = round(mean(Trust), 2),
-    SD = round(sd(Trust), 2),
-    .groups = 'drop'
-  )
-
+### 1. DESCRIPTIVE STATISTICS ###
 h3_table <- my_df %>%
-  group_by(Subject) %>%  # Using your actual column name
+  group_by(Subject) %>%
   summarise(
     n = n(),
     Median = median(Trust),
@@ -351,78 +437,196 @@ h3_table <- my_df %>%
   ) %>%
   gt() %>%
   tab_header(
-    title = md("**AI Trust by Field of Study**"),
-    subtitle = "Science vs. Arts students"
+    title = md("**AI Trust Levels by Field of Study**"),
+    subtitle = "STEM vs Humanities/Social Sciences"
   ) %>%
-  fmt_number(
-    columns = c(Mean, SD),
-    decimals = 2
-  ) %>%
+  fmt_number(columns = c(Mean, SD), decimals = 2) %>%
   cols_label(
     n = md("**N**"),
     Median = md("**Median**"),
     Mean = md("**Mean**"),
     SD = md("**SD**")
-  ) %>%
-  tab_style(
-    style = cell_text(weight = "bold"),
-    locations = cells_column_labels()
-  ) %>%
-  data_color(
-    columns = Median,
-    colors = scales::col_numeric(
-      palette = c("#FF6B6B", "#4ECDC4"),
-      domain = c(1, 5)  # Trust scale range
-    )
   )
-h3_table
 
-ggplot(my_df, aes(Subject, fill = factor(Trust))) +
+### 2. VISUALIZATIONS ###
+# Stacked bar chart
+my_df_plot_h3 <- my_df %>%
+  mutate(Trust = factor(Trust, levels = sort(unique(Trust), decreasing = TRUE)))
+
+# Stacked bar chart (fixed)
+ggplot(my_df_plot_h3, aes(Subject, fill = Trust)) +
   geom_bar(position = "fill") +
   scale_fill_brewer(palette = "RdYlGn", direction = -1) +
   scale_y_continuous(labels = scales::percent) +
   labs(
-    title = "AI Trust Levels by Field of Study",
-    y = "Percentage",
-    fill = "Trust Score"
+    title = "AI Trust Distribution by Field of Study",
+    y = "Percentage"
+  )
+
+# Jitter plot with medians
+trust_summary <- my_df %>%
+  group_by(Subject) %>%
+  summarise(median = median(Trust))
+
+ggplot(my_df, aes(Subject, Trust, color = Subject)) +
+  geom_jitter(width = 0.15, alpha = 0.4) +
+  geom_point(
+    data = trust_summary,
+    aes(y = median),
+    shape = 21, size = 8, fill = "white"
   ) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-
-
-ggplot(my_df, aes(Subject, Trust, fill = Subject)) +
-  geom_boxplot(width = 0.5, alpha = 0.8) +
-  geom_jitter(width = 0.1, alpha = 0.4, size = 2) +
-  scale_fill_manual(values = c("Science" = "#4ECDC4", "Arts" = "#FF6B6B")) +
-  labs(
-    title = "Science Students Show Higher AI Trust",
-    x = NULL, 
-    y = "Trust Level (1-5)",
-    caption = "Boxes show medians; points represent individual responses"
+  geom_text(
+    data = trust_summary,
+    aes(y = median, label = median),
+    color = "black", size = 3.5
   ) +
-  theme_minimal()
+  scale_color_manual(values = c("Science" = "#4ECDC4", "Arts" = "#FF6B6B")) +
+  labs(title = "Field of Study Differences in AI Trust")
 
-ggplot(my_df, aes(Subject, Trust, fill = Subject)) + 
-  geom_violin(alpha = 0.7) +
-  geom_boxplot(width = 0.2, fill = "white") +
-  scale_fill_manual(values = c("Science" = "#4ECDC4", "Arts" = "#FF6B6B")) +
-  labs(title = "Science Students Show Higher Trust Distribution",
-       subtitle = "Despite equal medians (3.0), Science students skew toward higher trust",
-       y = "Trust Level (1-5)") +
-  theme_minimal()
-
-wilcox.test(Trust ~ Subject, data = my_df, exact = FALSE)
-wilcox_effsize(Trust ~ Subject, data = my_df, ci = TRUE)
+### 3. ORDINAL ANALYSIS ###
+wilcox_result <- wilcox.test(Trust ~ Subject, data = my_df, exact = FALSE)
 effsize <- wilcox_effsize(Trust ~ Subject, data = my_df, ci = TRUE)
-prob_superiority <- (effsize$effsize + 1)/2
-prob_ci_low <- (effsize$conf.low + 1)/2  
-prob_ci_high <- (effsize$conf.high + 1)/2
+
+### 4. BINARY ANALYSIS ###
+# Dichotomize Trust (High = 4-5, Low = 1-3)
+my_df <- my_df %>%
+  mutate(High_Trust = ifelse(Trust >= 4, "High", "Low"))
+
+contingency_table_h3 <- my_df %>%
+  group_by(Subject, High_Trust) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = High_Trust, values_from = Count) %>%
+  mutate(
+    Total = Low + High,
+    `% High` = round(High / Total * 100, 1),
+    `Within-Group Odds (High/Low)` = round(High / Low, 2)
+  ) %>%
+  gt() %>%
+  tab_header(title = "High vs Low AI Trust by Field of Study") %>%
+  fmt_number(columns = c(Low, High, Total, `Within-Group Odds (High/Low)`), decimals = 2) %>%
+  cols_label(
+    `% High` = md("**% High**"),
+    `Within-Group Odds (High/Low)` = md("**Within-Group Odds (High/Low)**")
+  )
+
+# Odds Ratio Calculation
+# (Adjust 'a', 'b', 'c', 'd' from your actual output!)
+cont_table <- table(my_df$Subject, my_df$High_Trust)
+a <- cont_table["Science", "High"]
+b <- cont_table["Science", "Low"]
+c <- cont_table["Arts", "High"]
+d <- cont_table["Arts", "Low"]
+
+or <- (a * d) / (b * c)
+or_ci <- exp(log(or) + c(-1.96, 1.96) * sqrt(1/a + 1/b + 1/c + 1/d))
+
+# Chi-square Test
+chi_test <- chisq.test(cont_table)
+
+### 5. REPORTING ###
+cat("--- H3: STEM students show higher trust in AI-generated information ---\n\n")
+
+cat("Ordinal Analysis:\n")
 cat(sprintf(
-  "Probability superiority: P(Science > Arts) = %.1f%% (95%% CI [%.1f%%, %.1f%%])",
-  prob_superiority * 100,
-  prob_ci_low * 100,
-  prob_ci_high * 100
+  "STEM students reported higher trust levels (Mdn = %.1f vs. Humanities/Social Sciences Mdn = %.1f; Mann-Whitney U = %.0f, p = %.3f).\n",
+  h3_table$`_data`$Median[h3_table$`_data`$Subject == "Science"],
+  h3_table$`_data`$Median[h3_table$`_data`$Subject == "Arts"],
+  wilcox_result$statistic,
+  wilcox_result$p.value
 ))
+cat(sprintf(
+  "Effect size: r = %.2f (95%% CI [%.2f, %.2f]). Probability superiority = %.1f%% (95%% CI [%.1f%%, %.1f%%]).\n\n",
+  effsize$effsize,
+  effsize$conf.low,
+  effsize$conf.high,
+  (effsize$effsize + 1)/2 * 100,
+  (effsize$conf.low + 1)/2 * 100,
+  (effsize$conf.high + 1)/2 * 100
+))
+
+cat("Binary Analysis (Trust ≥4):\n")
+cat(sprintf(
+  "STEM students had %.1f× higher odds of high trust (χ²(1) = %.2f, p = %.3f; 95%% CI [%.2f, %.2f]).",
+  or,
+  chi_test$statistic,
+  chi_test$p.value,
+  or_ci[1],
+  or_ci[2]
+))
+
+# Display outputs
+h3_table
+contingency_table_h3
+
 ```
 
-A Wilcoxon rank-sum test (equivalent to Mann-Whitney U test) revealed a statistically significant difference in trust levels between fields of study (W = 2357.5, *p* = .014), with Science students (Mdn = 3.0, *n* = 85) reporting higher trust than Arts students (Mdn = 3.0, *n* = 70). The effect size was small (rank-biserial *r* = 0.20, 95% CI [0.06, 0.36]), indicating a 59.8% probability that a randomly selected Science student would trust AI-generated information more than an Arts student (95% CI [52.0%, 67.0%]). While medians are equal (3.0), the test detects distributional differences in ranks (Science students skew higher).
+Ordinal Analysis
+STEM students reported significantly higher trust levels (Mdn = 3.0) than humanities/social sciences students (Mdn = 3.0), Mann-Whitney U = 2358, *p* = .014. The effect size was small (rank-biserial *r* = 0.20, 95% CI [0.05, 0.35]), indicating a 59.8% probability that a randomly selected STEM student would report higher trust than a humanities/social sciences student (95% CI [52.5%, 67.5%]).
+
+Binary Analysis
+STEM students had 2.3× higher odds of exhibiting high trust (≥4 on the scale) than humanities/social sciences students, χ²(1) = 4.79, *p* = .029; 95% CI [1.14, 4.59]. The contingency table revealed:
+
+STEM students: 42.4% high trust (36/85), within-group odds = 0.73
+
+Humanities/Arts students: 24.3% high trust (17/70), within-group odds = 0.32
+
+Justification
+The ordinal outcome (trust measured on a 1–5 Likert-type scale) and independent groups (STEM vs. humanities/arts) justified a non-parametric approach. The Wilcoxon rank-sum test (Mann-Whitney U) was selected to compare distributions without assuming normality. The rank-biserial *r* and probability superiority metric were included to quantify practical significance beyond *p*-values.
+
+To augment the ordinal analysis, trust was dichotomized (high = 4–5, low = 1–3) to examine proportional differences via chi-square. The odds ratio (OR = 2.3) indicates STEM students were 2.3 times more likely to report high trust. The 95% confidence interval [1.14, 4.59] excludes 1, supporting a statistically significant association. A chi-square test was chosen over Fisher’s exact test because all expected cell frequencies exceeded 5 (min expected count = 19.3).
+
+Consistency of Evidence
+While medians were equal (3.0), the significant U statistic (*p* = .014) and positive effect size (*r* = 0.20) suggest STEM students’ trust distributions skewed higher. This aligns with the binary analysis (higher odds of high trust among STEM students). Narrow CIs for both effect size and odds ratio strengthen evidence for a true effect.
+
+# BONUS: Correlation between AI Use and AI Trust
+
+```{r}
+
+# 1. Create the tab
+tab <- table(my_df$AI_Use_Binary, my_df$High_Trust)
+
+# 2. Run Chi-square test
+chisq_test <- chisq.test(tab)
+chisq_test
+
+# 3. Pretty contingency table
+contingency_table <- as.data.frame.matrix(tab) %>%
+  tibble::rownames_to_column("AI_Use_Binary") %>%
+  mutate(Total = Low + High,
+         `% High Trust` = round(High / Total * 100, 1)) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Contingency Table: AI Use Binary vs High Trust**")
+  ) %>%
+  fmt_number(columns = c(Low, High, Total), decimals = 0) %>%
+  cols_label(
+    Low = md("**Low Trust**"),
+    High = md("**High Trust**"),
+    Total = md("**Total**"),
+    `% High Trust` = md("**% High Trust**")
+  )
+
+# 4. SHOW the table
+contingency_table
+
+# Calculate percentages for plotting
+plot_data <- as.data.frame(prop.table(table(my_df$AI_Use_Binary, my_df$High_Trust), margin = 1))
+colnames(plot_data) <- c("AI_Use", "Trust", "Percentage")
+
+# Create plot
+ggplot(plot_data, aes(x = AI_Use, y = Percentage*100, fill = Trust)) +
+  geom_col(position = "dodge", width = 0.7) +
+  geom_text(aes(label = paste0(round(Percentage*100, 1), "%")), 
+            position = position_dodge(width = 0.7), 
+            vjust = -0.5, size = 4) +
+  scale_fill_manual(values = c("High" = "#4CAF50", "Low" = "#F44336")) +
+  labs(title = "Trust in AI by Usage Frequency",
+       x = "AI Use Frequency",
+       y = "Percentage of Students",
+       fill = "Trust Level") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+```
+There's a statistically significant relationship between AI use and trust levels (χ²(1) = 8.73, p = .003). Students who frequently use AI tools (High AI Use group) are significantly more likely to trust AI outputs compared to infrequent users. While only 27% of low AI users show high trust, this jumps to 55% among high AI users - a doubling of trust levels. This difference is statistically reliable (p < .01).
+
